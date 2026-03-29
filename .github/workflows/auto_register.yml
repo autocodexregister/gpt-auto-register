@@ -1,0 +1,231 @@
+name: Auto Register & Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: '操作类型'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - check
+          - register
+          - sync
+          - all
+      register_count:
+        description: '注册账号数量'
+        required: false
+        default: '10'
+      max_workers:
+        description: '并发线程数'
+        required: false
+        default: '3'
+      min_healthy:
+        description: '最小健康账号数阈值'
+        required: false
+        default: '2000'
+      force_register:
+        description: '强制注册（忽略健康度）'
+        required: false
+        default: 'false'
+        type: boolean
+      enable_cpa:
+        description: '同步到 CPA 平台'
+        required: false
+        default: 'true'
+        type: boolean
+      enable_sub2api:
+        description: '同步到 Sub2Api 平台'
+        required: false
+        default: 'true'
+        type: boolean
+  schedule:
+    - cron: '0 */6 * * *'  # 每 6 小时执行一次
+
+concurrency:
+  group: auto-register-sync
+  cancel-in-progress: false
+
+env:
+  PYTHONUNBUFFERED: '1'
+  MODE: github
+  FORCE_IPV6: 'true'  # GitHub Actions 默认启用 IPv6
+
+  # Sub2Api 配置
+  SUB2API_BASE_URL: ${{ secrets.SUB2API_BASE_URL }}
+  SUB2API_ADMIN_KEY: ${{ secrets.SUB2API_ADMIN_KEY }}
+  SUB2API_MIN_HEALTHY: ${{ github.event.inputs.min_healthy || vars.SUB2API_MIN_HEALTHY || '2000' }}
+  SUB2API_GROUP_IDS: ${{ vars.SUB2API_GROUP_IDS || '2' }}
+
+  # CPA 配置
+  CPA_BASE_URL: ${{ secrets.CPA_BASE_URL }}
+  CPA_MANAGEMENT_KEY: ${{ secrets.CPA_MANAGEMENT_KEY }}
+
+  # MoeMail 配置
+  DUCKMAIL_API_BASE: ${{ secrets.DUCKMAIL_API_BASE }}
+  DUCKMAIL_BEARER: ${{ secrets.DUCKMAIL_BEARER }}
+
+  # 注册配置
+  REGISTER_COUNT: ${{ github.event.inputs.register_count || vars.REGISTER_COUNT || '10' }}
+  REGISTER_MAX_WORKERS: ${{ github.event.inputs.max_workers || vars.REGISTER_MAX_WORKERS || '3' }}
+  FORCE_REGISTER: ${{ github.event.inputs.force_register || 'false' }}
+
+  # 同步配置
+  ENABLE_CPA: ${{ github.event.inputs.enable_cpa || vars.ENABLE_CPA || 'true' }}
+  ENABLE_SUB2API: ${{ github.event.inputs.enable_sub2api || vars.ENABLE_SUB2API || 'true' }}
+
+  # OAuth 配置
+  ENABLE_OAUTH: 'true'
+  OAUTH_REQUIRED: 'true'
+
+jobs:
+  check-health:
+    if: github.event.inputs.action != 'register'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      need_register: ${{ steps.check.outputs.need_register }}
+      total: ${{ steps.check.outputs.total }}
+      status: ${{ steps.check.outputs.status }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check Sub2Api Health
+        id: check
+        run: |
+          python sync_manager.py check \
+            --min-healthy "${SUB2API_MIN_HEALTHY}" \
+            || exit_code=$?
+
+          if [ "${exit_code:-0}" = "100" ]; then
+            echo "need_register=true" >> $GITHUB_OUTPUT
+            echo "status=warning" >> $GITHUB_OUTPUT
+            echo "🔔 账号池健康度不足，需要注册"
+          else
+            echo "need_register=false" >> $GITHUB_OUTPUT
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "✅ 账号池健康度正常"
+          fi
+
+  register-accounts:
+    if: |
+      (needs.check-health.outputs.need_register == 'true') ||
+      (github.event.inputs.force_register == 'true') ||
+      (github.event.inputs.action == 'register') ||
+      (github.event.inputs.action == 'all')
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    outputs:
+      success_count: ${{ steps.register.outputs.success_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Prepare directories
+        run: |
+          mkdir -p codex_tokens
+          touch registered_accounts.txt
+
+      - name: Register Accounts
+        id: register
+        run: |
+          echo "🚀 开始注册 ${REGISTER_COUNT} 个账号，并发数 ${REGISTER_MAX_WORKERS}..."
+          python simple_register.py \
+            -n "${REGISTER_COUNT}" \
+            -w "${REGISTER_MAX_WORKERS}" \
+            -o registered_accounts.txt
+
+          SUCCESS_COUNT=$(grep -c "oauth=ok" registered_accounts.txt || echo "0")
+          echo "success_count=${SUCCESS_COUNT}" >> $GITHUB_OUTPUT
+          echo "✅ 成功注册 ${SUCCESS_COUNT} 个账号"
+
+  sync-to-platforms:
+    if: |
+      (needs.register-accounts.outputs.success_count > 0) ||
+      (github.event.inputs.action == 'sync') ||
+      (github.event.inputs.action == 'all')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Sync to CPA
+        if: env.ENABLE_CPA == 'true'
+        env:
+          CPA_BASE_URL: ${{ secrets.CPA_BASE_URL }}
+          CPA_MANAGEMENT_KEY: ${{ secrets.CPA_MANAGEMENT_KEY }}
+        run: |
+          echo "📤 同步账号到 CPA 平台..."
+          python sync_manager.py cpa \
+            --token-dir codex_tokens \
+            --accounts-file registered_accounts.txt
+
+      - name: Sync to Sub2Api
+        if: env.ENABLE_SUB2API == 'true'
+        run: |
+          echo "📤 同步账号到 Sub2Api 平台..."
+          python sync_manager.py sub2api \
+            --token-dir codex_tokens \
+            --accounts-file registered_accounts.txt
+
+  upload-artifacts:
+    if: always()
+    needs: [register-accounts, sync-to-platforms]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: register-results-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            registered_accounts.txt
+            codex_tokens/*.json
+            health_report.json
+
+  summary:
+    if: always()
+    needs: [check-health, register-accounts, sync-to-platforms]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## 🎯 任务执行完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 项目 | 值 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| 操作类型 | ${{ github.event.inputs.action || 'scheduled' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 需要注册 | ${{ needs.check-health.outputs.need_register || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 注册成功 | ${{ needs.register-accounts.outputs.success_count || 0 }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| CPA 同步 | ${{ env.ENABLE_CPA }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Sub2Api 同步 | ${{ env.ENABLE_SUB2API }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 运行 ID | ${{ github.run_id }} |" >> $GITHUB_STEP_SUMMARY
