@@ -50,7 +50,11 @@
       "Bash(gh auth:*)",
       "Bash(mkdir -p docs)",
       "Bash(cp web/dashboard/index.html docs/index.html)",
-      "Bash(xxd)"
+      "Bash(xxd)",
+      "Bash(npm list:*)",
+      "Bash(npm install:*)",
+      "Bash(vercel:*)",
+      "Bash(start https://vercel.com/login)"
     ]
   }
 }
