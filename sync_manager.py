@@ -12,20 +12,37 @@ from typing import Dict, List, Optional
 from curl_cffi import requests as curl_requests
 
 
+def _load_config() -> dict:
+    """从 config.json 加载配置"""
+    config_path = Path(__file__).parent / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
 class AccountSyncManager:
     """统一账号同步管理器"""
 
     def __init__(self):
         self.session = curl_requests.Session(impersonate="chrome131")
+        config = _load_config()
 
-        # CPA 配置
-        self.cpa_base_url = os.getenv("CPA_BASE_URL", "https://cpa.xspace.icu")
-        self.cpa_management_key = os.getenv("CPA_MANAGEMENT_KEY", "")
+        # CPA 配置 (环境变量优先，config.json 作为备选)
+        self.cpa_base_url = os.getenv("CPA_BASE_URL") or config.get("cpa_base_url", "https://cpa.xspace.icu")
+        self.cpa_management_key = os.getenv("CPA_MANAGEMENT_KEY") or config.get("cpa_management_key", "")
 
-        # Sub2Api 配置
-        self.sub2api_base_url = os.getenv("SUB2API_BASE_URL", "https://sub2api.xspace.icu")
-        self.sub2api_admin_key = os.getenv("SUB2API_ADMIN_KEY", "")
-        self.sub2api_group_ids = [int(x) for x in os.getenv("SUB2API_GROUP_IDS", "2").split(",") if x.strip()]
+        # Sub2Api 配置 (环境变量优先，config.json 作为备选)
+        self.sub2api_base_url = os.getenv("SUB2API_BASE_URL") or config.get("sub2api_base_url", "https://sub2api.xspace.icu")
+        self.sub2api_admin_key = os.getenv("SUB2API_ADMIN_KEY") or config.get("sub2api_bearer", "")
+        group_ids_str = os.getenv("SUB2API_GROUP_IDS", "")
+        if group_ids_str:
+            self.sub2api_group_ids = [int(x) for x in group_ids_str.split(",") if x.strip()]
+        else:
+            self.sub2api_group_ids = config.get("sub2api_group_ids", [2])
 
         # 配置是否启用
         self.enable_cpa = bool(self.cpa_management_key)
