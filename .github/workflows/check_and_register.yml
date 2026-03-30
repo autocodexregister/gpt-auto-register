@@ -92,8 +92,8 @@ jobs:
       CPA_BASE_URL: ${{ secrets.CPA_BASE_URL }}
       CPA_MANAGEMENT_KEY: ${{ secrets.CPA_MANAGEMENT_KEY }}
       CPA_MIN_CANDIDATES: ${{ vars.CPA_MIN_CANDIDATES || '200' }}
-      AUTO_UPLOAD_SUB2API: ${{ vars.AUTO_UPLOAD_SUB2API || 'false' }}
-      SUB2API_BASE_URL: ${{ secrets.SUB2API_BASE_URL }}
+      AUTO_UPLOAD_SUB2API: ${{ vars.AUTO_UPLOAD_SUB2API || 'true' }}
+      SUB2API_BASE_URL: ${{ secrets.SUB2API_BASE_URL || 'https://sub2api.xspace.icu' }}
       SUB2API_BEARER: ${{ secrets.SUB2API_BEARER }}
       SUB2API_EMAIL: ${{ secrets.SUB2API_EMAIL }}
       SUB2API_PASSWORD: ${{ secrets.SUB2API_PASSWORD }}
