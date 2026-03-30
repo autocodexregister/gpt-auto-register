@@ -110,7 +110,7 @@ class AccountSyncManager:
                 url,
                 json=payload,
                 headers={
-                    "Authorization": f"Bearer {self.sub2api_admin_key}",
+                    "X-API-Key": self.sub2api_admin_key,
                     "Content-Type": "application/json"
                 },
                 timeout=30
@@ -228,7 +228,7 @@ class AccountSyncManager:
             resp = self.session.get(
                 url,
                 params={"page": 1, "page_size": 1, "platform": "openai", "type": "oauth"},
-                headers={"Authorization": f"Bearer {self.sub2api_admin_key}"},
+                headers={"X-API-Key": self.sub2api_admin_key},
                 timeout=20
             )
             resp.raise_for_status()

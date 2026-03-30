@@ -30,7 +30,8 @@ class Sub2ApiManager:
         """发送请求到 Sub2Api"""
         url = f"{self.base_url}{path}"
         headers = kwargs.pop("headers", {})
-        headers["Authorization"] = f"Bearer {self.admin_key}"
+        # Sub2Api uses X-API-Key header (not Bearer)
+        headers["X-API-Key"] = self.admin_key
 
         try:
             resp = self.session.request(method, url, headers=headers, timeout=30, **kwargs)
