@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 from pathlib import Path
 
 from curl_cffi import requests as cffi
@@ -9,7 +8,6 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-import simple_register as reg
 from sync_manager import AccountSyncManager
 
 
@@ -60,7 +58,9 @@ def _get_sub2api_token() -> str:
     bearer = str(os.getenv("SUB2API_BEARER", "") or "").strip()
     if bearer:
         return bearer
-    token = reg._sub2api_login()
+
+    manager = AccountSyncManager()
+    token = manager._get_sub2api_token()
     return str(token or "").strip()
 
 
@@ -69,29 +69,45 @@ def _fetch_sub2api_total(token: str) -> int:
     if not base_url:
         raise ValueError("SUB2API_BASE_URL 未配置")
 
-    headers = {"Accept": "application/json"}
+    header_candidates = [{"Accept": "application/json"}]
     if token:
-        # Sub2Api uses X-API-Key header (not Bearer)
-        headers["X-API-Key"] = token
+        # Repo history contains both auth styles; try both instead of hard-coding one.
+        header_candidates = [
+            {"Accept": "application/json", "X-API-Key": token},
+            {"Accept": "application/json", "Authorization": f"Bearer {token}"},
+        ]
 
-    resp = cffi.get(
-        f"{base_url}/api/v1/admin/accounts",
-        params={"page": 1, "page_size": 1, "platform": "openai", "type": "oauth"},
-        headers=headers,
-        timeout=20,
-        impersonate="chrome131",
-    )
-    resp.raise_for_status()
+    last_error = None
+    for headers in header_candidates:
+        try:
+            resp = cffi.get(
+                f"{base_url}/api/v1/admin/accounts",
+                params={"page": 1, "page_size": 1, "platform": "openai", "type": "oauth"},
+                headers=headers,
+                timeout=20,
+                impersonate="chrome131",
+            )
 
-    data = resp.json()
-    payload = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
-    if not isinstance(payload, dict):
-        payload = {}
+            if resp.status_code in {401, 403} and len(header_candidates) > 1:
+                last_error = RuntimeError(f"auth rejected with status {resp.status_code}")
+                continue
 
-    try:
-        return int(payload.get("total", 0) or 0)
-    except Exception:
-        return 0
+            resp.raise_for_status()
+            data = resp.json()
+            payload = data.get("data") if isinstance(data, dict) and isinstance(data.get("data"), dict) else data
+            if not isinstance(payload, dict):
+                payload = {}
+
+            try:
+                return int(payload.get("total", 0) or 0)
+            except Exception:
+                return 0
+        except Exception as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("获取 Sub2Api 账号总数失败")
 
 
 def main() -> int:
