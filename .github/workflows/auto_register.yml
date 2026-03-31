@@ -32,7 +32,7 @@ on:
       enable_cpa:
         description: '同步到 CPA 平台'
         required: false
-        default: 'true'
+        default: 'false'
         type: boolean
       enable_sub2api:
         description: '同步到 Sub2Api 平台'

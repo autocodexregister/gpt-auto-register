@@ -72,7 +72,7 @@ class AccountSyncManager:
         if not self.sub2api_email or not self.sub2api_password:
             return None
         try:
-            login_url = f"{self.sub2api_base_url.rstrip('/')}/auth/login"
+            login_url = f"{self.sub2api_base_url.rstrip('/')}/api/v1/auth/login"
             resp = self.session.post(
                 login_url,
                 json={"email": self.sub2api_email, "password": self.sub2api_password},
